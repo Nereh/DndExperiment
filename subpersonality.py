@@ -5,7 +5,7 @@ import json
 from typing import List, Dict, Iterable, Optional
 import uuid
 
-from memory import MemoryCollection
+from memory import Memory, MemoryCollection
 from ollama_client import OllamaClient
 
 @dataclass
@@ -46,12 +46,16 @@ Payload (JSON):
 {payload}
 """
 
-    retain_memory_directive = """
+    should_retain_memory_directive = """
 You are a subpersonality of a character dictated by the JSON payload provided.
 
 
 Rules:
 - Return the word "true" exactly as presented if
+"""
+
+    summarize_retained_memory_directive = """
+
 """
 
     def consult(self, scenario: str) -> str:
@@ -85,4 +89,37 @@ Rules:
         return self.llm_client.generate(model=self.model, prompt=consult_prompt)
     
     def retain_memory(self, scenario: str, action_taken: str, result: str):
+        payload = {
+            "experience": {
+                "scenario": scenario,
+                "action_taken": action_taken,
+                "result": result
+            },
+            "personality": {
+                "motive": self.motive,
+                "fear": self.fear,
+                "strategy": self.strategy,
+                "blind_spot": self.blind_spot
+            }
+        }
+        should_retain_memory_prompt = self.should_retain_memory_directive.format(
+            payload=json.dumps(payload, ensure_ascii=False)
+        )
+
+        should_retain_memory_str = self.llm_client.generate(model=self.model, prompt=should_retain_memory_prompt)
+        s = should_retain_memory_str.strip()
+        should_retain_memory = json.loads(s)
+        if not isinstance(should_retain_memory, bool):
+            should_retain_memory = False
+
+        if not should_retain_memory:
+            return
         
+        summarize_retained_memory_prompt = self.summarize_retained_memory_directive.format(
+            payload=json.dumps(payload, ensure_ascii=False)
+        )
+
+        summarized_memory = self.llm_client.generate(model=self.model, prompt=summarize_retained_memory_prompt)
+
+        new_memory = Memory(statement=summarized_memory, decay_rate=0.01, strength_initial=1, current_strength=1)
+        self.memory.add(new_memory)
